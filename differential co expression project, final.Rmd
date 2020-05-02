@@ -1,0 +1,142 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Source: https://melbourne.figshare.com/articles/812_simulated_expression_datasets_for_differential_co-expression_analysis/8010176
+
+```{r}
+#setwd("C:/Users/bmescher/Downloads")
+simdata.FULL = readRDS("C:/Users/bmescher/Desktop/UTH/Stats Genomics/sim812.rds")
+```
+
+```{r}
+length(simdata.FULL)
+names(simdata.FULL[[2]]) #2nd of 812 simulations
+```
+
+
+```{r}
+names(attributes(simdata.FULL[[2]]$data))
+dim(simdata.FULL[[2]]$data)
+length(dimnames(simdata.FULL[[2]]$data)[[1]]) #150 named genes
+length(dimnames(simdata.FULL[[2]]$data)[[2]]) #391 named samples 
+#classf(simdata.FULL[[2]]$data)
+head(simdata.FULL[[2]]$data[,1:5])
+#simitr = i from 1 to 812
+#scores = 21,609 x 15 sparse matrix (mostly 0s, some 1s)
+#inputmodels = 25 length, with proportion / mean / sd for each gene
+#staticnet = igraph object with the 150 node network
+#data = 150 x 391 - expression for each of 150 nodes
+```
+
+
+https://www.bioconductor.org/packages/release/bioc/html/dcanr.html
+
+http://127.0.0.1:28260/library/dcanr/doc/dcanr_vignette.html
+
+```{r}
+library(dcanr)
+dcMethods()
+```
+
+
+# Recreate the F1 scores...
+### Association relationships
+```{r}
+results <- NULL
+for (i in seq(812)){
+  allnets <- lapply(dcMethods(), function(m) {
+    dcPipeline(simdata.FULL[[i]], dc.func = m, precomputed = TRUE)
+  })
+  names(allnets) <- dcMethods() #name the results based on methods
+  f1_scores <- lapply(allnets, function (net) {
+    dcEvaluate(simdata.FULL[[i]], net, truth.type = 'association', combine = TRUE)
+  })
+  results <- c(results,unlist(f1_scores))
+}
+length(results)
+8932 / 812 
+final.results.association <- matrix(results,nrow=812,byrow=TRUE)
+colnames(final.results.association) <- dcMethods()
+write.table(final.results.association,"C:/Users/bmescher/Desktop/UTH/Stats Genomics/finalresults_association.csv",sep=",", dec=".",row.names=FALSE)
+dim(final.results.association)
+head(final.results.association)
+```
+
+### Influence relationships
+```{r}
+results <- NULL
+for (i in seq(812)){
+  allnets <- lapply(dcMethods(), function(m) {
+    dcPipeline(simdata.FULL[[i]], dc.func = m, precomputed = TRUE)
+  })
+  names(allnets) <- dcMethods() #name the results based on methods
+  f1_scores <- lapply(allnets, function (net) {
+    dcEvaluate(simdata.FULL[[i]], net, truth.type = 'influence', combine = TRUE)
+  })
+  results <- c(results,unlist(f1_scores))
+}
+length(results)
+8932 / 812 
+final.results.influence <- matrix(results,nrow=812,byrow=TRUE)
+colnames(final.results.influence) <- dcMethods()
+write.table(final.results.influence,"C:/Users/bmescher/Desktop/UTH/Stats Genomics/finalresults_influence.csv",sep=",", dec=".",row.names=FALSE)
+dim(final.results.influence)
+head(final.results.influence)
+```
+
+### Direct relationships
+```{r}
+results <- NULL
+for (i in seq(812)){
+  allnets <- lapply(dcMethods(), function(m) {
+    dcPipeline(simdata.FULL[[i]], dc.func = m, precomputed = TRUE)
+  })
+  names(allnets) <- dcMethods() #name the results based on methods
+  f1_scores <- lapply(allnets, function (net) {
+    dcEvaluate(simdata.FULL[[i]], net, truth.type = 'direct', combine = TRUE)
+  })
+  results <- c(results,unlist(f1_scores))
+}
+length(results)
+8932 / 812 
+final.results.direct <- matrix(results,nrow=812,byrow=TRUE)
+colnames(final.results.direct) <- dcMethods()
+write.table(final.results.direct,"C:/Users/bmescher/Desktop/UTH/Stats Genomics/finalresults_direct.csv",sep=",", dec=".",row.names=FALSE)
+dim(final.results.direct)
+head(final.results.direct)
+```
+
+### Convert to long tidy data
+```{r}
+library(tidyr)
+df <- as.data.frame(final.results.association[,t])
+df['TruthType'] <- 'Association'
+long.df <- df %>% pivot_longer(-TruthType,names_to='Diff. Co-Exp. Method',values_to='F1')
+
+df <- as.data.frame(final.results.influence[,t])
+df['TruthType'] <- 'Influence'
+long.df <- rbind(long.df,df %>% pivot_longer(-TruthType,names_to='Diff. Co-Exp. Method',values_to='F1'))
+
+            
+df <- as.data.frame(final.results.direct[,t])
+df['TruthType'] <- 'Direct'
+long.df <- rbind(long.df,df %>% pivot_longer(-TruthType,names_to='Diff. Co-Exp. Method',values_to='F1'))
+
+head(long.df)
+```
+
+### Use ggplot2 to graph
+https://cmdlinetips.com/2019/02/how-to-make-grouped-boxplots-with-ggplot2/
+```{r}
+library(ggplot2)
+long.df %>% 
+  ggplot(aes(x=reorder(`Diff. Co-Exp. Method`, -1*F1, FUN = sum),y=F1, fill=TruthType)) +
+  geom_boxplot() +
+  theme(legend.position="bottom") +
+  xlab("Diff. Co-Exp. Method") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  ylim(c(0,1)) 
+```
+

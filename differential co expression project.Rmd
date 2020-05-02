@@ -1,0 +1,428 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Source: https://melbourne.figshare.com/articles/812_simulated_expression_datasets_for_differential_co-expression_analysis/8010176
+
+```{r}
+#setwd("C:/Users/bmescher/Downloads")
+simdata.FULL = readRDS("C:/Users/bmescher/Desktop/UTH/Stats Genomics/sim812.rds")
+```
+
+```{r}
+length(simdata.FULL)
+names(simdata.FULL[[2]]) #2nd of 812 simulations
+```
+
+```{r}
+dim(simdata.FULL[[1]]$scores)
+dim(simdata.FULL[[2]]$scores)
+```
+
+
+```{r}
+names(attributes(simdata.FULL[[2]]$data))
+dim(simdata.FULL[[2]]$data)
+length(dimnames(simdata.FULL[[2]]$data)[[1]]) #150 named genes
+length(dimnames(simdata.FULL[[2]]$data)[[2]]) #391 named samples 
+#classf(simdata.FULL[[2]]$data)
+head(simdata.FULL[[2]]$data[,1:5])
+#simitr = i from 1 to 812
+#scores = 21,609 x 15 sparse matrix (mostly 0s, some 1s)
+#inputmodels = 25 length, with proportion / mean / sd for each gene
+#staticnet = igraph object with the 150 node network
+#data = 150 x 391 - expression for each of 150 nodes
+```
+
+
+https://www.bioconductor.org/packages/release/bioc/html/dcanr.html
+
+http://127.0.0.1:28260/library/dcanr/doc/dcanr_vignette.html
+
+```{r}
+library(dcanr)
+dcMethods()
+```
+
+##Load the dataset included with dcanr package
+http://127.0.0.1:28260/library/dcanr/doc/dcanr_vignette.html
+
+List 2 knockdowns using getConditionNames()
+```{r}
+data(sim102)
+#get available conditions
+getConditionNames(sim102)
+```
+
+
+In the bigger dataset from the actual paper, the object has 812 elements (accessed with [[i]]). simitr counts up from 1 to 1000, which identifies the run of the simulation program that was ultimately saved as one of 812 converging runs for the final dataset:
+```{r}
+length(simdata.FULL) #from the actual paper
+names(simdata.FULL[[1]])
+simdata.FULL[[1]]$simitr
+simdata.FULL[[23]]$simitr
+simdata.FULL[[85]]$simitr #the 85th converging data is from the 102nd iteration of the simulator
+simdata.FULL[[812]]$simitr
+simdata.FULL[[85]]$data[1:5,1:5]
+names(simdata.FULL[[85]]$inputmodels) #list of modesls, with proportion/mean/sd for each
+#simdata.FULL[[85]]$numinput #12
+names(attributes(simdata.FULL[[85]]$data))
+dim(simdata.FULL[[85]]$data) #150 x 406
+```
+
+```{r}
+simdata.FULL[[85]]$numbimodal #2... these are the number of genes that are knocked down and have a bimodal distribution!
+```
+
+
+Looking at the toy dataset from the package, only a single element is in this list. It is actually the 102nd iteration from the full dataset (element 85)!
+```{r}
+length(sim102)
+names(sim102) #in the toy dataset, you only have 1 simluation (?), inseetad of firsta accessing simdata812[[1]]
+sim102$simitr
+sim102$data[1:5,1:5]
+names(sim102$inputmodels)
+sim102$numinput #12
+```
+
+```{r}
+dim(sim102$data) #150 gene rows, 406 different samples
+sim102$data[1:5,400]
+```
+
+### Save data from the toy dataset
+For the UME6 knock-down
+```{r}
+simdata <- getSimData(sim102, cond.name = 'UME6', full = FALSE)
+emat <- simdata$emat
+ume6_kd <- simdata$condition
+print(emat[1:5, 1:5]) #149 genes and 406 samples
+```
+
+```{r}
+head(ume6_kd) #whether or not UME6 was knocked down (binary 1 or 2)
+```
+
+### Compute Scores
+
+```{r}
+#apply the z-score method with Spearman correlations
+z_scores <- dcScore(emat, ume6_kd, dc.method = 'zscore', cor.method = 'spearman')
+print(z_scores[1:5, 1:5])
+```
+
+### Perform statistical test
+Using dscore() function.
+```{r}
+#perform a statistical test: the z-test is selected automatically
+raw_p <- dcTest(z_scores, emat, ume6_kd)
+print(raw_p[1:5, 1:5])
+```
+
+### Correct for multiple hypothesis testing
+Testing every pairwise combination of genes. Use FDR to adjust p values from the preiovus step.
+
+```{r}
+#adjust p-values (raw p-values from dcTest should NOT be modified)
+adj_p <- dcAdjust(raw_p, f = p.adjust, method = 'fdr')
+print(adj_p[1:5, 1:5])
+```
+
+### Generate differential co-expression network
+Default adjusted p-value thresholds of 0.1 are applied where statistical tests are performed (to control for FDR at 0.1). Then the results that pass the threshold are graphed (edges are colored based on score: negative to pos graphed from purple to green.)
+```{r}
+library(igraph)
+
+#get the differential network
+dcnet <- dcNetwork(z_scores, adj_p)
+plot(dcnet, vertex.label = '')
+```
+
+```{r}
+#convert to an adjacency matrix
+adjmat <- as_adj(dcnet, sparse = FALSE)
+print(adjmat[1:5, 1:5])
+```
+
+```{r}
+#convert to a data.frame
+edgedf <- as_data_frame(dcnet, what = 'edges')
+print(head(edgedf))
+```
+
+
+## Now try to repeat, but on the full dataset
+```{r}
+simdata <- getSimData(simdata.FULL[[85]], cond.name = 'UME6', full = FALSE)
+emat <- simdata$emat
+ume6_kd <- simdata$condition
+z_scores <- dcScore(emat, ume6_kd, dc.method = 'zscore', cor.method = 'spearman')
+raw_p <- dcTest(z_scores, emat, ume6_kd)
+adj_p <- dcAdjust(raw_p, f = p.adjust, method = 'fdr')
+dcnet <- dcNetwork(z_scores, adj_p)
+plot(dcnet, vertex.label = '')
+```
+
+
+## From the paper
+### Simulation setup for evaluations
+Method performance was evaluated across 1000 simulations. Simulated networks with 150 nodes were sampled from the S. cerevisiae network and approximately 500 expression profiles simulated from the network, resulting in 150 × 500 expression matrix. Some simulations resulted in fewer expression profiles due to the steady-state not being solved. 
+
+### Summary statistics of simulations
+
+
+
+
+
+https://github.com/DavisLaboratory/dcanr/blob/master/vignettes/dcanr_evaluation_vignette.Rmd
+
+```{r}
+#run a standard pipeline with the z-score method
+dcnets <- dcPipeline(sim102, dc.func = 'zscore')
+#plot the source network, true differential network and inferred networks
+op <- par(no.readonly = TRUE)
+par(mfrow = c(2, 2))
+plotSimNetwork(sim102, main = 'Regulatory network')
+plotSimNetwork(sim102, what = 'association', main = 'True differential association network')
+plot(dcnets$ADR1, main = 'ADR1 KD predicted network')
+plot(dcnets$UME6, main = 'UME6 KD predicted network')
+par(op)
+```
+
+Results from a pipeline are provided as a list of `igraph` objects representing
+the inferred networks, one for each knock-down. True positive predictions are
+coloured based on the colour of the knocked-down node and false positives are
+coloured grey. The `plotSimNetwork` function can be used to retrieve and plot
+the true differential networks and the source regulatory network.
+
+Any additional parameters for intermediate steps in a standard pipeline can be
+passed as shown in the example below. However, doing so will produce results
+different from the precomputed results discussed in (Section \@ref(precomp)).
+
+
+
+```{r}
+#run a standard pipeline with the z-score method with custom params
+dcnets_sp <- dcPipeline(sim102,
+                        dc.func = 'zscore',
+                        cor.method = 'spearman', #use Spearman's correlation
+                        thresh = 0.2) #cut-off for creating the network
+```
+
+If the parameters need to be specified for each condition, the `cond.args`
+argument can be used. For example, the LDGM method requires the regularisation
+parameter to be specified for each condition. Since `sim102` has 2 conditions
+(*ADR1*-knockdown and *UME6*-knockdown), `ldgm.lambda` needs to be specified for
+each case. Alternatively, the number of edges in the DC network resulting from
+each condition can be passed using `ldgm.ntarget` in `cond.args`.
+
+```{r}
+sim102_lambdas = c(0.5145742607781790267651, 0.3486682118540171959609)
+dcnets_ldgm <- dcPipeline(sim102,
+                          dc.func = 'ldgm',
+                          cond.args = list(
+                            ldgm.lambda = sim102_lambdas
+                          ))
+```
+
+
+
+## Retrieving pre-computed results {#precomp}
+Following evaluation of a novel method, it is generally of interest to compare
+how it performs against previous methods. Re-computing predictions for the 10
+methods implemented in this package can be time consuming. As such, all
+simulations come packaged with results from applying a standard pipeline using
+each inference method. Pre-computed results are also retrieved using the
+`dcPipeline` function, with the `precomputed` argument set to `TRUE`.
+
+```{r message=FALSE, warning=FALSE}
+#retrieve results of applying all available methods
+allnets <- lapply(dcMethods(), function(m) {
+  dcPipeline(sim102, dc.func = m, precomputed = TRUE)
+})
+names(allnets) <- dcMethods() #name the results based on methods
+#get the size of the UME6 KD differential network
+netsizes <- lapply(allnets, function(net) {
+  length(igraph::E(net$UME6))
+})
+print(unlist(netsizes))
+```
+
+
+
+# Evaluate a pipeline
+After inferring the differential co-expression network, the final step is to
+evaluate performance based on the truth. True differential networks are computed
+by performing a sensitivity analysis as described in the **Bhuva et al.
+(manuscript in preparation)**. Three levels of true differential networks are
+generated:
+
+1. Direct - this represents direct TF-target regulatory interactions that are
+affected by the knock-down (condition)
+2. Influence - this network includes upstream TF-target interactions which are
+indirect but causative
+3. Association - this network includes all associations in the influence network
+but adds all non-causative associations that are differential when conditioned
+on the knock-down
+
+All three levels of truth are included within the simulated data. Predicted
+networks can be evaluated against any of these. We recommend using the
+differential association network.
+
+Along with the true differential co-expression network, a metric is required to summarise
+performance of a method. The package provides 6 different metrics which can be accessed
+by calling `perfMethods()`.
+
+
+```{r}
+#available performance metrics
+print(perfMethods())
+```
+
+Evaluation is performed using the `dcEvaluate` function. We will run this with the 
+precomputed inferences as described in (Section \@ref(precomp)). The F1-measure will
+be computed to assess performance.
+
+```{r message=FALSE, warning=FALSE}
+#compute the F1-measure for the prediction made by each method
+f1_scores <- lapply(allnets, function (net) {
+  dcEvaluate(sim102, net, truth.type = 'association', combine = TRUE)
+})
+print(sort(unlist(f1_scores), decreasing = TRUE))
+
+#compute the Matthew's correlation coefficient of the z-score inference
+z_mcc <- dcEvaluate(sim102, dcnets, perf.method = 'MCC')
+print(z_mcc)
+```
+
+
+
+# Recreate the F1 scores...
+### For the package toy data
+```{r}
+#retrieve results of applying all available methods
+allnets <- lapply(dcMethods(), function(m) {
+  dcPipeline(sim102, dc.func = m, precomputed = TRUE)
+})
+names(allnets) <- dcMethods() #name the results based on methods
+f1_scores <- lapply(allnets, function (net) {
+  dcEvaluate(sim102, net, truth.type = 'association', combine = TRUE)
+})
+
+print(unlist(f1_scores))
+
+```
+
+### For the same iteration in the full dataset
+```{r}
+allnets <- lapply(dcMethods(), function(m) {
+  dcPipeline(simdata.FULL[[85]], dc.func = m, precomputed = TRUE)
+})
+names(allnets) <- dcMethods() #name the results based on methods
+f1_scores <- lapply(allnets, function (net) {
+  dcEvaluate(simdata.FULL[[85]], net, truth.type = 'association', combine = TRUE)
+})
+print(unlist(f1_scores))
+dcMethods()
+```
+
+
+### Association relationships
+```{r}
+results <- NULL
+for (i in seq(812)){
+  allnets <- lapply(dcMethods(), function(m) {
+    dcPipeline(simdata.FULL[[i]], dc.func = m, precomputed = TRUE)
+  })
+  names(allnets) <- dcMethods() #name the results based on methods
+  f1_scores <- lapply(allnets, function (net) {
+    dcEvaluate(simdata.FULL[[i]], net, truth.type = 'association', combine = TRUE)
+  })
+  results <- c(results,unlist(f1_scores))
+}
+length(results)
+8932 / 812 
+final.results.association <- matrix(results,nrow=812,byrow=TRUE)
+colnames(final.results.association) <- dcMethods()
+write.table(final.results.association,"C:/Users/bmescher/Desktop/UTH/Stats Genomics/finalresults_association.csv",sep=",", dec=".",row.names=FALSE)
+dim(final.results.association)
+head(final.results.association)
+```
+
+### Influence relationships
+```{r}
+results <- NULL
+for (i in seq(812)){
+  allnets <- lapply(dcMethods(), function(m) {
+    dcPipeline(simdata.FULL[[i]], dc.func = m, precomputed = TRUE)
+  })
+  names(allnets) <- dcMethods() #name the results based on methods
+  f1_scores <- lapply(allnets, function (net) {
+    dcEvaluate(simdata.FULL[[i]], net, truth.type = 'influence', combine = TRUE)
+  })
+  results <- c(results,unlist(f1_scores))
+}
+length(results)
+8932 / 812 
+final.results.influence <- matrix(results,nrow=812,byrow=TRUE)
+colnames(final.results.influence) <- dcMethods()
+write.table(final.results.influence,"C:/Users/bmescher/Desktop/UTH/Stats Genomics/finalresults_influence.csv",sep=",", dec=".",row.names=FALSE)
+dim(final.results.influence)
+head(final.results.influence)
+```
+
+### Direct relationships
+```{r}
+results <- NULL
+for (i in seq(812)){
+  allnets <- lapply(dcMethods(), function(m) {
+    dcPipeline(simdata.FULL[[i]], dc.func = m, precomputed = TRUE)
+  })
+  names(allnets) <- dcMethods() #name the results based on methods
+  f1_scores <- lapply(allnets, function (net) {
+    dcEvaluate(simdata.FULL[[i]], net, truth.type = 'direct', combine = TRUE)
+  })
+  results <- c(results,unlist(f1_scores))
+}
+length(results)
+8932 / 812 
+final.results.direct <- matrix(results,nrow=812,byrow=TRUE)
+colnames(final.results.direct) <- dcMethods()
+write.table(final.results.direct,"C:/Users/bmescher/Desktop/UTH/Stats Genomics/finalresults_direct.csv",sep=",", dec=".",row.names=FALSE)
+dim(final.results.direct)
+head(final.results.direct)
+```
+
+### Convert to long tidy data
+```{r}
+library(tidyr)
+df <- as.data.frame(final.results.association[,t])
+df['TruthType'] <- 'Association'
+long.df <- df %>% pivot_longer(-TruthType,names_to='Diff. Co-Exp. Method',values_to='F1')
+
+df <- as.data.frame(final.results.influence[,t])
+df['TruthType'] <- 'Influence'
+long.df <- rbind(long.df,df %>% pivot_longer(-TruthType,names_to='Diff. Co-Exp. Method',values_to='F1'))
+
+            
+df <- as.data.frame(final.results.direct[,t])
+df['TruthType'] <- 'Direct'
+long.df <- rbind(long.df,df %>% pivot_longer(-TruthType,names_to='Diff. Co-Exp. Method',values_to='F1'))
+
+head(long.df)
+```
+
+### Use ggplot2 to graph
+https://cmdlinetips.com/2019/02/how-to-make-grouped-boxplots-with-ggplot2/
+```{r}
+library(ggplot2)
+long.df %>% 
+  ggplot(aes(x=reorder(`Diff. Co-Exp. Method`, -1*F1, FUN = sum),y=F1, fill=TruthType)) +
+  geom_boxplot() +
+  theme(legend.position="bottom") +
+  xlab("Diff. Co-Exp. Method") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  ylim(c(0,1)) 
+```
+
